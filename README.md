@@ -1,29 +1,13 @@
-## RocksDB: A Persistent Key-Value Store for Flash and RAM Storage
+# Commands
+### Build rocksdb
+`CXXFLAGS="-arch arm64 -g -O0" LDFLAGS="-arch arm64 -L/opt/homebrew/lib" DEBUG_LEVEL=2 MAKE_SHARED_LIBS=1 make -j$(sysctl -n hw.logicalcpu)`
+* This builds in debug mode, with no optimization(in case debug function symbols are dropped), and enables shared library.
 
-[![CircleCI Status](https://circleci.com/gh/facebook/rocksdb.svg?style=svg)](https://circleci.com/gh/facebook/rocksdb)
+### Compile script to profile
+`g++ -std=c++17 -g -O0 profiling/point_lookup/dtrace.cpp -o point_lookup_test -I./include -L./ -L/opt/homebrew/lib -lrocksdb -lz -lbz2 -lzstd -llz4 -pthread`
 
-RocksDB is developed and maintained by Facebook Database Engineering Team.
-It is built on earlier work on [LevelDB](https://github.com/google/leveldb) by Sanjay Ghemawat (sanjay@google.com)
-and Jeff Dean (jeff@google.com)
-
-This code is a library that forms the core building block for a fast
-key-value server, especially suited for storing data on flash drives.
-It has a Log-Structured-Merge-Database (LSM) design with flexible tradeoffs
-between Write-Amplification-Factor (WAF), Read-Amplification-Factor (RAF)
-and Space-Amplification-Factor (SAF). It has multi-threaded compactions,
-making it especially suitable for storing multiple terabytes of data in a
-single database.
-
-Start with example usage here: https://github.com/facebook/rocksdb/tree/main/examples
-
-See the [github wiki](https://github.com/facebook/rocksdb/wiki) for more explanation.
-
-The public interface is in `include/`.  Callers should not include or
-rely on the details of any other header files in this package.  Those
-internal APIs may be changed without warning.
-
-Questions and discussions are welcome on the [RocksDB Developers Public](https://www.facebook.com/groups/rocksdb.dev/) Facebook group and [email list](https://groups.google.com/g/rocksdb) on Google Groups.
-
-## License
-
-RocksDB is dual-licensed under both the GPLv2 (found in the COPYING file in the root directory) and Apache 2.0 License (found in the LICENSE.Apache file in the root directory).  You may select, at your option, one of the above-listed licenses.
+# Scripts
+* `probe.d` is to fetch all probes in the form '<provider>:<module>:<function>:<name>' encountered for a given process
+* `trace.d` is to get all functions called for a given process
+* `dtrace.cpp` is the script used to instantiate a database instance, write and read to it.
+* `sort_trace_output.cpp` is the script meant to be run after `dtrace.cpp` to sort the output in descending time elapsed.
