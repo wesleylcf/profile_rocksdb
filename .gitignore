@@ -1,3 +1,6 @@
+*.csv
+*.txt
+
 make_config.mk
 rocksdb.pc
 
