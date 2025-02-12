@@ -9,7 +9,6 @@ pid$target:::entry
 }
 
 pid$target:::return
-/self->start/
 {
     printf("Elapsed time for function %s.%s.%s: %d ns\n", 
            probeprov, probemod, probefunc, timestamp - self->start);
