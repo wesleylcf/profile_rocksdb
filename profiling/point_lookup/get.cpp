@@ -1,6 +1,7 @@
 #include <rocksdb/db.h>
 #include <iostream>
 #include <vector>
+#include <unistd.h>
 
 int main() {
     rocksdb::DB* db;
@@ -16,11 +17,15 @@ int main() {
 
     std::string value;
     // Perform lookups for existing keys
+    sleep(3); // Give DTrace time to attach
+    
     std::cout << "BEGIN_POINT_LOOKUP: Key Exists" << std::endl;
+    sleep(3); // Give DTrace time to attach
     status = db->Get(rocksdb::ReadOptions(), "key1", &value);
     if (!status.ok()) {
         throw std::invalid_argument("Error retrieving value");
     }
+    sleep(3); // Give DTrace time to attach
     std::cout << "END_POINT_LOOKUP: Key Exists" << std::endl;
     std::cout << "Retrieved: " << value << std::endl;
 
