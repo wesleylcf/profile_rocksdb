@@ -14,19 +14,8 @@ int main() {
         throw std::invalid_argument("Error opening database");
     }
 
-    // Insert a large number of key-value pairs
-    for (int i = 0; i < 100; ++i) {
-        status = db->Put(rocksdb::WriteOptions(), "key" + std::to_string(i), "value" + std::to_string(i));
-        if (!status.ok()) {
-            throw std::invalid_argument("Error writing value");
-        }
-    }
-    // for (int i = 0; i < 100000; ++i) {
-    //     db->Put(rocksdb::WriteOptions(), "key" + std::to_string(i), "value" + std::to_string(i));
-    // }
-
-    // Perform lookups for existing keys
     std::string value;
+    // Perform lookups for existing keys
     std::cout << "BEGIN_POINT_LOOKUP: Key Exists" << std::endl;
     status = db->Get(rocksdb::ReadOptions(), "key1", &value);
     if (!status.ok()) {
@@ -35,11 +24,11 @@ int main() {
     std::cout << "END_POINT_LOOKUP: Key Exists" << std::endl;
     std::cout << "Retrieved: " << value << std::endl;
 
-    // Perform a lookup for a non-existent key (this should take more time)
+  // Perform a lookup for a non-existent key (this should take more time)
     // std::cout << "BEGIN_POINT_LOOKUP: Key !Exists" << std::endl;
     // status = db->Get(rocksdb::ReadOptions(), "key_non_existent", &value);
-    // if (!status.ok()) {
-    //     throw std::invalid_argument("Error retrieving !existing value");
+    // if (!status.IsNotFound()) {
+    //     throw std::invalid_argument("Found !existing key");
     // }
     // std::cout << "END_POINT_LOOKUP: Key !Exists" << std::endl;
     // std::cout << "Retrieved: " << value << std::endl;
@@ -49,6 +38,5 @@ int main() {
     if (!status.ok()) {
         throw std::invalid_argument("Error closing database");
     }
-    delete db;
     return 0;
 }
