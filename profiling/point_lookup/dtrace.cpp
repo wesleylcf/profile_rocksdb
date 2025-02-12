@@ -9,6 +9,9 @@ int main() {
 
     // Open the database
     rocksdb::Status status = rocksdb::DB::Open(options, "/tmp/testdb", &db);
+    if (!status.ok()) {
+        std::cout << "Error opening DB: " << status.ToString() << std::endl;
+    }
     assert(status.ok());
 
     // Insert a large number of key-value pairs
@@ -22,7 +25,7 @@ int main() {
     // Perform lookups for existing keys
     std::string value;
     db->Get(rocksdb::ReadOptions(), "key1", &value);
-    // std::cout << "Retrieved: " << value << std::endl;
+    std::cout << "Retrieved: " << value << std::endl;
 
     // Perform a lookup for a non-existent key (this should take more time)
     std::cout << "BEGIN_POINT_LOOKUP" << std::endl;

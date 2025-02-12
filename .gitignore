@@ -6,7 +6,6 @@ rocksdb.pc
 
 *.a
 *.arc
-*.d
 *.dylib*
 *.gcda
 *.gcno
