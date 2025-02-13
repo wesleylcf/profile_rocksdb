@@ -17,15 +17,12 @@ int main() {
 
     std::string value;
     // Perform lookups for existing keys
-    sleep(3); // Give DTrace time to attach
     
     std::cout << "BEGIN_POINT_LOOKUP: Key Exists" << std::endl;
-    sleep(3); // Give DTrace time to attach
     status = db->Get(rocksdb::ReadOptions(), "key1", &value);
     if (!status.ok()) {
         throw std::invalid_argument("Error retrieving value");
     }
-    sleep(3); // Give DTrace time to attach
     std::cout << "END_POINT_LOOKUP: Key Exists" << std::endl;
     std::cout << "Retrieved: " << value << std::endl;
 
@@ -43,5 +40,6 @@ int main() {
     if (!status.ok()) {
         throw std::invalid_argument("Error closing database");
     }
+    sleep(3); // Let dtrace capture all probes before the current process exits.
     return 0;
 }
