@@ -18,13 +18,12 @@ int main() {
     std::string value;
     // Perform lookups for existing keys
     
-    std::cout << "BEGIN_POINT_LOOKUP: Key Exists" << std::endl;
+    sleep(2);
     status = db->Get(rocksdb::ReadOptions(), "key1", &value);
+    sleep(2);
     if (!status.ok()) {
         throw std::invalid_argument("Error retrieving value");
     }
-    std::cout << "END_POINT_LOOKUP: Key Exists" << std::endl;
-    std::cout << "Retrieved: " << value << std::endl;
 
   // Perform a lookup for a non-existent key (this should take more time)
     // std::cout << "BEGIN_POINT_LOOKUP: Key !Exists" << std::endl;
@@ -40,6 +39,5 @@ int main() {
     if (!status.ok()) {
         throw std::invalid_argument("Error closing database");
     }
-    sleep(3); // Let dtrace capture all probes before the current process exits.
     return 0;
 }
