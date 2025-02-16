@@ -1,12 +1,13 @@
-#!/usr/sbin/dtrace -s
+#pragma D option quiet
 
-// Define the probes for entry and exit of functions related to 'rocksdb::'
-pid$target:::entry {
+pid$target:librocksdb_debug.9.11.0.dylib::entry {
+    printf("ENTRY|%s\n", probefunc);
     self->start_time = timestamp; // Capture the start time of the function call
 }
 
-pid$target:::return {
+pid$target:librocksdb_debug.9.11.0.dylib::return {
     // Calculate the time elapsed by subtracting start_time from the current timestamp
-    printf("%s took %llu ns", probefunc, timestamp - self->start_time);
+    this->elapsed_time = timestamp - self->start_time;
+    printf("RETURN|%s|%lu\n", probefunc, this->elapsed_time); // Use | as a separator
     self->start_time = 0; // Reset the start time
 }
