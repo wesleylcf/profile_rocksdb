@@ -10,7 +10,7 @@ int main() {
     std::cout.setf( std::ios_base::unitbuf ); // cause a flush at the end of each print
 
     // Open the database
-    rocksdb::Status status = rocksdb::DB::Open(options, "/tmp/testdb", &db);
+    rocksdb::Status status = rocksdb::DB::Open(options, "/var/tmp/testdb", &db);
     if (!status.ok()) {
         throw std::invalid_argument("Error opening database");
     }
