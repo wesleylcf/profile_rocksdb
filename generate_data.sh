@@ -1,0 +1,1 @@
+cd model && make && cd .. && ./generate_data

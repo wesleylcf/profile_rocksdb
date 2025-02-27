@@ -29,7 +29,7 @@ using namespace std::chrono;
 namespace fs = std::filesystem;
 
 string DB_PATH = "/tmp/testdb";
-string OUTPUT_PATH = "/Users/wesley/Documents/GitHub/rocksdb/model/blackbox/rocksdb_benchmark_results.csv";
+string OUTPUT_PATH = "/Users/wesley/Documents/GitHub/rocksdb/model/blackbox/rocksdb_benchmark_results_sequential.csv";
 
 struct BenchmarkResult {
     size_t data_size;
@@ -62,7 +62,7 @@ string generate_random_string(size_t length) {
 }
 
 size_t parse_size_string(const string& size_str) {
-    std::istringstream iss(size_str);
+    istringstream iss(size_str);
     size_t size;
     char unit;
     iss >> size >> unit;
@@ -99,17 +99,15 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
 
     options.max_background_jobs = max_background_jobs;
 
-    // Block Cache and Bloom Filter (Correct Way - as per RocksDB documentation)
+    // Block Cache and Bloom Filter
     BlockBasedTableOptions table_options;
-
     table_options.block_cache = NewLRUCache(parse_size_string(block_cache_size_str));
 
     if (bloom_filter_policy_str == "true") {
-      table_options.filter_policy.reset(NewBloomFilterPolicy(10));
+        table_options.filter_policy.reset(NewBloomFilterPolicy(10));
     }
 
     options.table_factory.reset(NewBlockBasedTableFactory(table_options));
-
 
     string db_path = DB_PATH + "_" + generate_uuid();
 
@@ -137,24 +135,43 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
         put_duration_sum += duration_cast<microseconds>(stop - start).count();
     }
 
-    
     long long duration = 0;
     if (operation_type == "PUT") {
         duration = (num_entries > 0) ? put_duration_sum / num_entries : 0; // Average PUT latency
     } else if (operation_type == "GET") {
-        string last_key = "key_" + to_string(num_entries - 1);
-        string read_value;
+        int num_keys_to_get = min(100, (int) num_entries); // Get up to 100 keys
+        vector<string> random_keys;
+        
+        // Generate 100 random keys within the inserted range
+        unordered_set<int> unique_indices;
+        random_device rd;
+        mt19937 gen(rd());
+        uniform_int_distribution<int> distrib(0, num_entries - 1);
 
-        auto start = high_resolution_clock::now();
-        s = db->Get(ReadOptions(), last_key, &read_value);
-        auto stop = high_resolution_clock::now();
-
-        if (!s.ok()) {
-            cerr << "Error during GET: " << s.ToString() << endl;
-            exit(1);
+        while (unique_indices.size() < num_keys_to_get) {
+            unique_indices.insert(distrib(gen));
         }
 
-        duration = duration_cast<microseconds>(stop - start).count(); // Single GET latency
+        for (int idx : unique_indices) {
+            random_keys.push_back("key_" + to_string(idx));
+        }
+
+        long long get_duration_sum = 0;
+        for (const string& key : random_keys) {
+            string read_value;
+            auto start = high_resolution_clock::now();
+            s = db->Get(ReadOptions(), key, &read_value);
+            auto stop = high_resolution_clock::now();
+
+            if (!s.ok()) {
+                cerr << "Error during GET: " << s.ToString() << endl;
+                exit(1);
+            }
+
+            get_duration_sum += duration_cast<microseconds>(stop - start).count();
+        }
+
+        duration = (num_keys_to_get > 0) ? get_duration_sum / num_keys_to_get : 0; // Average GET latency
     } else if (operation_type == "SEEK") {
         int num_keys_to_seek = min((size_t)100, num_entries);
         vector<string> last_keys;
@@ -179,23 +196,32 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
     // Remove the database directory after the benchmark is complete
     try {
         fs::remove_all(db_path);
-    } catch (const std::exception& e) {
+    } catch (const exception& e) {
         cerr << "Error removing database directory: " << e.what() << endl;
-        // Handle the error appropriately, perhaps exit or log it.
     }
 
     return {num_entries, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, max_background_jobs, bloom_filter_policy_str, duration};
 }
 
+// Function to animate the polling log
+void animate_polling_log(int current_job, int total_jobs, atomic<bool>& running) {
+    int dot_count = 0;
+    while (running) {
+        string dots(dot_count + 1, '.');
+        cout << "\033[2K\rCurrent job " << current_job << "/" << total_jobs << dots << flush; // Clear line and rewrite
+        dot_count = (dot_count + 1) % 3; // Cycle through 0, 1, 2 for ., .., ...
+        this_thread::sleep_for(milliseconds(500)); // Update every 500ms
+    }
+}
 
 int main() {
     try {
         fs::remove_all(DB_PATH); // Remove the base DB directory
-    } catch (const std::exception& e) {
+    } catch (const exception& e) {
         cerr << "Error cleaning up database directory: " << e.what() << endl;
-        return 1; // Or handle the error appropriately
+        return 1;
     }
-  
+
     vector<string> num_entries = {"10000", "50000", "100000", "200000", "500000", "1000000"};
     vector<string> write_buffer_sizes = {"64M", "128M"};
     vector<string> block_cache_sizes = {"64M", "128M"};
@@ -204,9 +230,8 @@ int main() {
     vector<string> bloom_filter_policies = {"true", "false"};
     vector<string> operation_types = {"PUT", "GET", "SEEK"};
 
-
     vector<vector<string>> params = {
-        num_entries,      // Convert size_t to string
+        num_entries,
         operation_types,
         write_buffer_sizes,
         block_cache_sizes,
@@ -214,7 +239,6 @@ int main() {
         max_background_jobs_values,
         bloom_filter_policies
     };
-
 
     set<vector<string>> combinations;
     vector<int> indices(params.size(), 0);
@@ -245,16 +269,18 @@ int main() {
         if (k < 0) break; // All combinations generated
     }
 
-    int total_runs = combinations.size();
-    ThreadSafeCounter completed_runs;
-    mutex progress_mutex;
-
     ofstream outfile(OUTPUT_PATH);
     outfile << "data_size,operation_type,write_buffer_size,block_cache_size,compaction_style,max_background_jobs,bloom_filter_policy,latency\n";
 
     auto overall_start = high_resolution_clock::now();
-    vector<future<BenchmarkResult>> futures;
-    std::counting_semaphore max_concurrency(std::thread::hardware_concurrency()); // Limit concurrency
+    int total_runs = combinations.size();
+    int completed_runs = 0;
+
+    // Atomic flag to control the polling log thread
+    atomic<bool> running(true);
+
+    // Start the polling log thread
+    thread polling_thread(animate_polling_log, completed_runs + 1, total_runs, ref(running));
 
     for (const auto& combination : combinations) {
         size_t data_size = stoul(combination[0]);
@@ -265,51 +291,34 @@ int main() {
         int max_background_jobs = stoi(combination[5]);
         string bloom_filter_policy = combination[6];
 
-        futures.push_back(async(launch::async, [&, data_size, operation_type, write_buffer_size, block_cache_size, compaction_style, max_background_jobs, bloom_filter_policy](){
-            BenchmarkResult result = run_benchmark(data_size, write_buffer_size, block_cache_size, compaction_style, max_background_jobs, bloom_filter_policy, operation_type);
-            return result;
-        }));
-    }
+        BenchmarkResult result = run_benchmark(data_size, write_buffer_size, block_cache_size, compaction_style, max_background_jobs, bloom_filter_policy, operation_type);
 
-    for (auto& future : futures) {
-        try {
-            BenchmarkResult result = future.get();
+        outfile << result.data_size << "," << result.operation_type << ","
+                << result.write_buffer_size << "," << result.block_cache_size << ","
+                << result.compaction_style << "," << result.max_background_jobs << ","
+                << result.bloom_filter_policy << "," << result.latency << "\n";
 
-            outfile << result.data_size << "," << result.operation_type << ","
-                    << result.write_buffer_size << "," << result.block_cache_size << ","
-                    << result.compaction_style << "," << result.max_background_jobs << ","
-                    << result.bloom_filter_policy << "," << result.latency << "\n";
+        completed_runs++;
 
-            {
-                lock_guard<mutex> lock(progress_mutex);
-                completed_runs.increment();
-                auto now = high_resolution_clock::now();
-                auto elapsed_time = duration_cast<seconds>(now - overall_start).count();
+        // Log the completion of the current job
+        cout << "\033[2K\rCompleted job " << completed_runs << "/" << total_runs << " with parameters: "
+             << "data_size=" << data_size << ", "
+             << "operation_type=" << operation_type << ", "
+             << "write_buffer_size=" << write_buffer_size << ", "
+             << "block_cache_size=" << block_cache_size << ", "
+             << "compaction_style=" << compaction_style << ", "
+             << "max_background_jobs=" << max_background_jobs << ", "
+             << "bloom_filter_policy=" << bloom_filter_policy << endl;
 
-                double percentage_complete = (double)completed_runs.get_value() / total_runs * 100.0;
-
-                // Correct estimated time calculation:
-                double estimated_total_time = (percentage_complete > 0) ? (elapsed_time / percentage_complete * 100.0) : 0.0;
-                double estimated_time_remaining = estimated_total_time - elapsed_time;
-
-                cout << fixed << setprecision(2) << "Progress: " << percentage_complete << "% | Elapsed: " << elapsed_time << "s | Remaining: " << estimated_time_remaining << "s | Config: ";
-
-                // Print the config for the completed benchmark
-                cout << result.data_size << "," << result.operation_type << ","
-                     << result.write_buffer_size << "," << result.block_cache_size << ","
-                     << result.compaction_style << "," << result.max_background_jobs << ","
-                     << result.bloom_filter_policy << "\r";
-
-            }
-        } catch (const std::future_error& e) {
-            cerr << "Future error: " << e.what() << endl;
-        } catch (const std::exception& e) {
-            cerr << "Exception in main thread (result retrieval): " << e.what() << endl;
-        } catch (...) {
-            cerr << "Unknown exception in main thread (result retrieval)" << endl;
+        // Update the polling log with the next job
+        if (completed_runs < total_runs) {
+            cout << "\033[2K\rCurrent job " << (completed_runs + 1) << "/" << total_runs << " ..." << flush;
         }
     }
-    futures.clear();
+
+    // Stop the polling log thread
+    running = false;
+    polling_thread.join();
 
     cout << endl;
     outfile.close();

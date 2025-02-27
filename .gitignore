@@ -1,5 +1,5 @@
-*.csv
 *.txt
+profiling/*.csv
 
 rocksdb_data_0/*
 
