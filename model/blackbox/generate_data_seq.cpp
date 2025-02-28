@@ -223,10 +223,10 @@ int main() {
     }
 
     vector<string> num_entries = {"10000", "50000", "100000", "200000", "500000", "1000000"};
-    vector<string> write_buffer_sizes = {"64M", "128M"};
-    vector<string> block_cache_sizes = {"64M", "128M"};
+    vector<string> write_buffer_sizes = {"8M", "16M", "32M", "64M", "128M", "256M"};
+    vector<string> block_cache_sizes = {"8M", "16M", "32M", "64M", "128M", "256M"};
     vector<string> compaction_styles = {"level", "universal"};
-    vector<string> max_background_jobs_values = {"2", "4"};
+    vector<string> max_background_jobs_values = {"1", "2", "4", "8", "16", "32"};
     vector<string> bloom_filter_policies = {"true", "false"};
     vector<string> operation_types = {"PUT", "GET", "SEEK"};
 
