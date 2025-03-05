@@ -20,8 +20,10 @@
 #include <tuple>
 #include <set>
 #include <semaphore>
-#include <uuid/uuid.h> 
+#include <uuid/uuid.h>
 #include "../common/thread_safe_counter.h"
+#include <csignal>
+
 
 using namespace std;
 using namespace rocksdb;
@@ -30,9 +32,9 @@ namespace fs = std::filesystem;
 
 string DB_PATH = "/tmp/testdb";
 string OUTPUT_PATH = "/Users/wesley/Documents/GitHub/rocksdb/model/blackbox/rocksdb_benchmark_results_sequential.csv";
-size_t KEY_SIZE = 10;
-size_t VALUE_SIZE = 90;
-size_t KEY_VALUE_SIZE = 100;
+size_t KEY_SIZE = 28;
+size_t VALUE_SIZE = 100;
+size_t ENTRY_SIZE = KEY_SIZE + VALUE_SIZE;
 uint64_t MAX_BYTES_PER_LEVEL_BASE = 20 * (1UL << 20); // Fixed 20MB max_bytes_for_level_base
 int BLOOM_FILTER_BITS_PER_KEY = 10;
 
@@ -229,27 +231,46 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
         cerr << "Error removing database directory: " << e.what() << endl;
     }
 
-    return {num_entries * KEY_VALUE_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, duration};
+    return {num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, duration};
 }
 
-// Function to animate the polling log
-void animate_polling_log(int* current_job, int total_jobs, atomic<bool>& running) {
-    int dot_count = 0;
-    while (running) {
-        string dots(dot_count + 1, '.');
-        cout << "\033[2K\rCurrent job " << (*current_job)+1 << "/" << total_jobs << dots << flush; // Clear line and rewrite
-        dot_count = (dot_count + 1) % 3; // Cycle through 0, 1, 2 for ., .., ...
-        this_thread::sleep_for(milliseconds(500)); // Update every 500ms
+/*
+* Removes directories matching the absolute path prefix (prefix should contain parent path)
+*/
+void remove_directories_with_prefix(const std::string& parent_path, const std::string& prefix) {
+    try {
+        for (const auto& entry : fs::directory_iterator(parent_path)) {
+            if (fs::is_directory(entry.status())) {
+                std::string entry_path = entry.path().string();
+                if (entry_path.rfind(prefix, 0) == 0) {
+                    try {
+                        fs::remove_all(entry.path());
+                    } catch (const fs::filesystem_error& remove_ex) {
+                        std::cerr << "Remove error: " << remove_ex.what() << std::endl;
+                    }
+                }
+            }
+        }
+    } catch (const fs::filesystem_error& ex) {
+        std::cerr << "Filesystem error: " << ex.what() << std::endl;
+    }
+}
+
+void signalHandler(int signal) {
+    if (signal == SIGINT) {
+        std::cout << "Interrupt signal (Ctrl+C) received. Cleaning up..." << std::endl;
+
+        try {
+            remove_directories_with_prefix("/tmp", "/tmp/testdb");
+        } catch (const exception& e) {
+            cerr << "Error cleaning up database directory: " << e.what() << endl;
+        }
+        exit(signal);
     }
 }
 
 int main() {
-    try {
-        fs::remove_all(DB_PATH); // Remove the base DB directory
-    } catch (const exception& e) {
-        cerr << "Error cleaning up database directory: " << e.what() << endl;
-        return 1;
-    }
+    std::signal(SIGINT, signalHandler);
 
     vector<string> data_sizes = {
         to_string(100UL * (1UL << 20)), // 100MB in bytes
@@ -305,17 +326,12 @@ int main() {
 
     auto overall_start = high_resolution_clock::now();
     int total_runs = combinations.size();
-    int* completed_runs = 0;
+    int completed_runs = 0;
 
-    // Atomic flag to control the polling log thread
-    atomic<bool> running(true);
-
-    // Start the polling log thread
-    thread polling_thread(animate_polling_log, &completed_runs, total_runs, ref(running));
 
     for (const auto& combination : combinations) {
         size_t data_size = stoul(combination[0]);
-        size_t num_entries = data_size / KEY_VALUE_SIZE;
+        size_t num_entries = data_size / ENTRY_SIZE;
         string operation_type = combination[1];
         string write_buffer_size = combination[2];
         string block_cache_size = combination[3];
@@ -341,14 +357,10 @@ int main() {
              << "bloom_filter_policy=" << bloom_filter_policy << endl;
 
         // Update the polling log with the next job
-        if (*completed_runs < total_runs) {
-            cout << "\033[2K\rCurrent job " << (completed_runs + 1) << "/" << total_runs << " ..." << flush;
+        if (completed_runs < total_runs) {
+            cout << "\033[2K\rCurrent job " << (completed_runs + 1) << "/" << total_runs << " ...\n" << flush;
         }
     }
-
-    // Stop the polling log thread
-    running = false;
-    polling_thread.join();
 
     cout << endl;
     outfile.close();

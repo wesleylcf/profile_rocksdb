@@ -1,1 +1,1 @@
-cd model && make && cd .. && ./generate_data
+cd model && make && cd .. && ulimit -n 4096 && ./generate_data && rm -rf /tmp/testdb*
