@@ -30,6 +30,9 @@ namespace fs = std::filesystem;
 
 string DB_PATH = "/tmp/testdb";
 string OUTPUT_PATH = "/Users/wesley/Documents/GitHub/rocksdb/model/blackbox/rocksdb_benchmark_results_sequential.csv";
+size_t KEY_SIZE = 10;
+size_t VALUE_SIZE = 90;
+size_t KEY_VALUE_SIZE = 100;
 
 struct BenchmarkResult {
     size_t data_size;
@@ -48,6 +51,29 @@ string generate_uuid() {
     char uuid_str[37];
     uuid_unparse(uuid, uuid_str);
     return string(uuid_str);
+}
+
+/*
+ *  Generates a key fixed to key_size bytes based on index, ensuring insertion order is maintained
+ */
+string generate_fixed_size_key(uint64_t index, size_t key_size) {
+    string key;
+    key.resize(key_size); // Allocate key_size bytes
+
+    // Calculate how many bytes are needed to represent the index
+    size_t index_bytes = min(key_size, (size_t)8); // Limit to 8 bytes for uint64_t
+
+    // Convert index to big-endian binary representation
+    for (size_t i = 0; i < index_bytes; ++i) {
+        key[key_size - index_bytes + i] = (index >> (8 * (index_bytes - 1 - i))) & 0xFF;
+    }
+
+    // Pad remaining bytes with zeros
+    for (size_t i = 0; i < key_size - index_bytes; ++i) {
+        key[i] = 0;
+    }
+
+    return key;
 }
 
 string generate_random_string(size_t length) {
@@ -114,7 +140,7 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
     DB* db;
     Status s = DB::Open(options, db_path, &db);
 
-    string value = generate_random_string(100);
+    string value = generate_random_string(VALUE_SIZE);
     long long put_duration_sum = 0;
 
     if (!s.ok()) {
@@ -123,7 +149,7 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
     }
 
     for (size_t i = 0; i < num_entries; ++i) {
-        string key = "key_" + to_string(i);
+        string key = generate_fixed_size_key(i, KEY_SIZE);
         auto start = high_resolution_clock::now();
         s = db->Put(WriteOptions(), key, value);
         auto stop = high_resolution_clock::now();
@@ -200,7 +226,7 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
         cerr << "Error removing database directory: " << e.what() << endl;
     }
 
-    return {num_entries, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, max_background_jobs, bloom_filter_policy_str, duration};
+    return {num_entries * KEY_VALUE_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, max_background_jobs, bloom_filter_policy_str, duration};
 }
 
 // Function to animate the polling log
@@ -222,7 +248,12 @@ int main() {
         return 1;
     }
 
-    vector<string> num_entries = {"10000", "50000", "100000", "200000", "500000", "1000000"};
+    vector<string> data_sizes = {
+        to_string(100UL * (1UL << 20)), // 100MB in bytes
+        to_string(1UL * (1UL << 30)),   // 1GB in bytes
+        to_string(10UL * (1UL << 30))  // 10GB in bytes
+    };
+    // vector<string> num_entries = {"10000", "50000", "100000", "200000", "500000", "1000000"};
     vector<string> write_buffer_sizes = {"64M", "128M"};
     vector<string> block_cache_sizes = {"64M", "128M"};
     vector<string> compaction_styles = {"level", "universal"};
@@ -231,7 +262,7 @@ int main() {
     vector<string> operation_types = {"PUT", "GET", "SEEK"};
 
     vector<vector<string>> params = {
-        num_entries,
+        data_sizes,
         operation_types,
         write_buffer_sizes,
         block_cache_sizes,
@@ -284,6 +315,7 @@ int main() {
 
     for (const auto& combination : combinations) {
         size_t data_size = stoul(combination[0]);
+        size_t num_entries = data_size / KEY_VALUE_SIZE;
         string operation_type = combination[1];
         string write_buffer_size = combination[2];
         string block_cache_size = combination[3];
@@ -291,7 +323,7 @@ int main() {
         int max_background_jobs = stoi(combination[5]);
         string bloom_filter_policy = combination[6];
 
-        BenchmarkResult result = run_benchmark(data_size, write_buffer_size, block_cache_size, compaction_style, max_background_jobs, bloom_filter_policy, operation_type);
+        BenchmarkResult result = run_benchmark(num_entries, write_buffer_size, block_cache_size, compaction_style, max_background_jobs, bloom_filter_policy, operation_type);
 
         outfile << result.data_size << "," << result.operation_type << ","
                 << result.write_buffer_size << "," << result.block_cache_size << ","
