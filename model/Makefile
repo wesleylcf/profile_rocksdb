@@ -1,6 +1,6 @@
 # rocksdb/model/Makefile
 
-CXXFLAGS = -std=c++17 -I../include -I.  # Include paths relative to model/
+CXXFLAGS = -std=c++17 -I../include -I. -g # Include paths relative to model/
 
 generate_data: common/thread_safe_counter.o blackbox/generate_data.o
 	g++ $(CXXFLAGS) common/thread_safe_counter.o blackbox/generate_data.o -o ../generate_data -L../ -L/opt/homebrew/lib -lrocksdb -lz -lbz2 -lzstd -llz4 -pthread

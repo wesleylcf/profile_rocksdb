@@ -33,6 +33,8 @@ string OUTPUT_PATH = "/Users/wesley/Documents/GitHub/rocksdb/model/blackbox/rock
 size_t KEY_SIZE = 10;
 size_t VALUE_SIZE = 90;
 size_t KEY_VALUE_SIZE = 100;
+uint64_t MAX_BYTES_PER_LEVEL_BASE = 20 * (1UL << 20); // Fixed 20MB max_bytes_for_level_base
+int BLOOM_FILTER_BITS_PER_KEY = 10;
 
 struct BenchmarkResult {
     size_t data_size;
@@ -40,7 +42,6 @@ struct BenchmarkResult {
     string write_buffer_size;
     string block_cache_size;
     string compaction_style;
-    int max_background_jobs;
     string bloom_filter_policy;
     long long latency;
 };
@@ -109,10 +110,13 @@ size_t parse_size_string(const string& size_str) {
     return size;
 }
 
-BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_size_str, const string& block_cache_size_str, const string& compaction_style, int max_background_jobs, const string& bloom_filter_policy_str, const string& operation_type) {
+BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_size_str, const string& block_cache_size_str, const string& compaction_style, const string& bloom_filter_policy_str, const string& operation_type) {
     Options options;
     options.create_if_missing = true;
     options.write_buffer_size = parse_size_string(write_buffer_size_str);
+    options.max_bytes_for_level_base = MAX_BYTES_PER_LEVEL_BASE;
+    options.level_compaction_dynamic_level_bytes = false; // Disable dynamic level bytes
+
 
     if (compaction_style == "level") {
         options.compaction_style = kCompactionStyleLevel;
@@ -123,14 +127,13 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
         exit(1);
     }
 
-    options.max_background_jobs = max_background_jobs;
 
     // Block Cache and Bloom Filter
     BlockBasedTableOptions table_options;
     table_options.block_cache = NewLRUCache(parse_size_string(block_cache_size_str));
 
     if (bloom_filter_policy_str == "true") {
-        table_options.filter_policy.reset(NewBloomFilterPolicy(10));
+        table_options.filter_policy.reset(NewBloomFilterPolicy(BLOOM_FILTER_BITS_PER_KEY));
     }
 
     options.table_factory.reset(NewBlockBasedTableFactory(table_options));
@@ -179,7 +182,7 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
         }
 
         for (int idx : unique_indices) {
-            random_keys.push_back("key_" + to_string(idx));
+            random_keys.push_back(generate_fixed_size_key(idx, KEY_SIZE));
         }
 
         long long get_duration_sum = 0;
@@ -202,7 +205,7 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
         int num_keys_to_seek = min((size_t)100, num_entries);
         vector<string> last_keys;
         for (size_t i = num_entries - num_keys_to_seek; i < num_entries; ++i) {
-            last_keys.push_back("key_" + to_string(i));
+            last_keys.push_back(generate_fixed_size_key(i, KEY_SIZE));
         }
 
         long long seek_duration_sum = 0;
@@ -226,15 +229,15 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
         cerr << "Error removing database directory: " << e.what() << endl;
     }
 
-    return {num_entries * KEY_VALUE_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, max_background_jobs, bloom_filter_policy_str, duration};
+    return {num_entries * KEY_VALUE_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, duration};
 }
 
 // Function to animate the polling log
-void animate_polling_log(int current_job, int total_jobs, atomic<bool>& running) {
+void animate_polling_log(int* current_job, int total_jobs, atomic<bool>& running) {
     int dot_count = 0;
     while (running) {
         string dots(dot_count + 1, '.');
-        cout << "\033[2K\rCurrent job " << current_job << "/" << total_jobs << dots << flush; // Clear line and rewrite
+        cout << "\033[2K\rCurrent job " << (*current_job)+1 << "/" << total_jobs << dots << flush; // Clear line and rewrite
         dot_count = (dot_count + 1) % 3; // Cycle through 0, 1, 2 for ., .., ...
         this_thread::sleep_for(milliseconds(500)); // Update every 500ms
     }
@@ -254,11 +257,10 @@ int main() {
         to_string(10UL * (1UL << 30))  // 10GB in bytes
     };
     // vector<string> num_entries = {"10000", "50000", "100000", "200000", "500000", "1000000"};
-    vector<string> write_buffer_sizes = {"64M", "128M"};
+    vector<string> write_buffer_sizes = {"2M"};
     vector<string> block_cache_sizes = {"64M", "128M"};
-    vector<string> compaction_styles = {"level", "universal"};
-    vector<string> max_background_jobs_values = {"2", "4"};
-    vector<string> bloom_filter_policies = {"true", "false"};
+    vector<string> compaction_styles = {"level"};
+    vector<string> bloom_filter_policies = {"true"};
     vector<string> operation_types = {"PUT", "GET", "SEEK"};
 
     vector<vector<string>> params = {
@@ -267,7 +269,6 @@ int main() {
         write_buffer_sizes,
         block_cache_sizes,
         compaction_styles,
-        max_background_jobs_values,
         bloom_filter_policies
     };
 
@@ -281,8 +282,7 @@ int main() {
             params[2][indices[2]],
             params[3][indices[3]],
             params[4][indices[4]],
-            params[5][indices[5]],
-            params[6][indices[6]]
+            params[5][indices[5]]
         };
         combinations.insert(current_combination);
 
@@ -301,17 +301,17 @@ int main() {
     }
 
     ofstream outfile(OUTPUT_PATH);
-    outfile << "data_size,operation_type,write_buffer_size,block_cache_size,compaction_style,max_background_jobs,bloom_filter_policy,latency\n";
+    outfile << "data_size,operation_type,write_buffer_size,block_cache_size,compaction_style,bloom_filter_policy,latency\n";
 
     auto overall_start = high_resolution_clock::now();
     int total_runs = combinations.size();
-    int completed_runs = 0;
+    int* completed_runs = 0;
 
     // Atomic flag to control the polling log thread
     atomic<bool> running(true);
 
     // Start the polling log thread
-    thread polling_thread(animate_polling_log, completed_runs + 1, total_runs, ref(running));
+    thread polling_thread(animate_polling_log, &completed_runs, total_runs, ref(running));
 
     for (const auto& combination : combinations) {
         size_t data_size = stoul(combination[0]);
@@ -320,14 +320,13 @@ int main() {
         string write_buffer_size = combination[2];
         string block_cache_size = combination[3];
         string compaction_style = combination[4];
-        int max_background_jobs = stoi(combination[5]);
-        string bloom_filter_policy = combination[6];
+        string bloom_filter_policy = combination[5];
 
-        BenchmarkResult result = run_benchmark(num_entries, write_buffer_size, block_cache_size, compaction_style, max_background_jobs, bloom_filter_policy, operation_type);
+        BenchmarkResult result = run_benchmark(num_entries, write_buffer_size, block_cache_size, compaction_style, bloom_filter_policy, operation_type);
 
         outfile << result.data_size << "," << result.operation_type << ","
                 << result.write_buffer_size << "," << result.block_cache_size << ","
-                << result.compaction_style << "," << result.max_background_jobs << ","
+                << result.compaction_style << ","
                 << result.bloom_filter_policy << "," << result.latency << "\n";
 
         completed_runs++;
@@ -339,11 +338,10 @@ int main() {
              << "write_buffer_size=" << write_buffer_size << ", "
              << "block_cache_size=" << block_cache_size << ", "
              << "compaction_style=" << compaction_style << ", "
-             << "max_background_jobs=" << max_background_jobs << ", "
              << "bloom_filter_policy=" << bloom_filter_policy << endl;
 
         // Update the polling log with the next job
-        if (completed_runs < total_runs) {
+        if (*completed_runs < total_runs) {
             cout << "\033[2K\rCurrent job " << (completed_runs + 1) << "/" << total_runs << " ..." << flush;
         }
     }
