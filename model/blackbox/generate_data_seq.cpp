@@ -36,7 +36,7 @@ size_t KEY_SIZE = 28;
 size_t VALUE_SIZE = 100;
 size_t ENTRY_SIZE = KEY_SIZE + VALUE_SIZE;
 uint64_t MAX_BYTES_PER_LEVEL_BASE = 20 * (1UL << 20); // Fixed 20MB max_bytes_for_level_base
-size_t LATENCY_SAMPLES_PER_EXPERIMENT = 10000;
+size_t number_of_operations = 10000;
 int BLOOM_FILTER_BITS_PER_KEY = 10;
 
 struct BenchmarkResult {
@@ -162,7 +162,7 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, const string& write_bu
     mt19937 gen(rd());
     uniform_int_distribution<int> distrib(0, num_entries - 1);
 
-    while (sample_indices.size() < LATENCY_SAMPLES_PER_EXPERIMENT) {
+    while (sample_indices.size() < number_of_operations) {
         sample_indices.insert(distrib(gen));
     }
 
@@ -212,7 +212,7 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, const string& write_bu
     } else if (operation_type == "SEEK") {
         results.clear();
         vector<string> last_keys;
-        for (size_t i = num_entries - LATENCY_SAMPLES_PER_EXPERIMENT; i < num_entries; ++i) {
+        for (size_t i = num_entries - number_of_operations; i < num_entries; ++i) {
             last_keys.push_back(generate_fixed_size_key(i, KEY_SIZE));
         }
 
