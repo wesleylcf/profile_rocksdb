@@ -36,6 +36,7 @@ size_t KEY_SIZE = 28;
 size_t VALUE_SIZE = 100;
 size_t ENTRY_SIZE = KEY_SIZE + VALUE_SIZE;
 uint64_t MAX_BYTES_PER_LEVEL_BASE = 20 * (1UL << 20); // Fixed 20MB max_bytes_for_level_base
+size_t LATENCY_SAMPLES_PER_EXPERIMENT = 10000;
 int BLOOM_FILTER_BITS_PER_KEY = 10;
 
 struct BenchmarkResult {
@@ -112,7 +113,9 @@ size_t parse_size_string(const string& size_str) {
     return size;
 }
 
-BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_size_str, const string& block_cache_size_str, const string& compaction_style, const string& bloom_filter_policy_str, const string& operation_type) {
+vector<BenchmarkResult> run_benchmark(size_t num_entries, const string& write_buffer_size_str, const string& block_cache_size_str, const string& compaction_style, const string& bloom_filter_policy_str, const string& operation_type) {
+    vector<BenchmarkResult> results;
+
     Options options;
     options.create_if_missing = true;
     options.write_buffer_size = parse_size_string(write_buffer_size_str);
@@ -146,11 +149,21 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
     Status s = DB::Open(options, db_path, &db);
 
     string value = generate_random_string(VALUE_SIZE);
-    long long put_duration_sum = 0;
+    long long duration = 0;
 
     if (!s.ok()) {
         cerr << "Error opening database: " << s.ToString() << endl;
         exit(1);
+    }
+
+    // generate unique indeces from [0, num_entries-1] for random sampling of latencies
+    unordered_set<int> sample_indices;
+    random_device rd;
+    mt19937 gen(rd());
+    uniform_int_distribution<int> distrib(0, num_entries - 1);
+
+    while (sample_indices.size() < LATENCY_SAMPLES_PER_EXPERIMENT) {
+        sample_indices.insert(distrib(gen));
     }
 
     for (size_t i = 0; i < num_entries; ++i) {
@@ -163,50 +176,43 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
             cerr << "Error during PUT: " << s.ToString() << endl;
             exit(1);
         }
-        put_duration_sum += duration_cast<microseconds>(stop - start).count();
+
+        if (sample_indices.find(i) != sample_indices.end()) {
+            duration = duration_cast<microseconds>(stop - start).count();
+            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, duration});
+        }
     }
 
-    long long duration = 0;
     if (operation_type == "PUT") {
-        duration = (num_entries > 0) ? put_duration_sum / num_entries : 0; // Average PUT latency
+        ;
     } else if (operation_type == "GET") {
-        int num_keys_to_get = min(100, (int) num_entries); // Get up to 100 keys
+        results.clear();
         vector<string> random_keys;
-        
-        // Generate 100 random keys within the inserted range
-        unordered_set<int> unique_indices;
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_int_distribution<int> distrib(0, num_entries - 1);
 
-        while (unique_indices.size() < num_keys_to_get) {
-            unique_indices.insert(distrib(gen));
-        }
 
-        for (int idx : unique_indices) {
+        for (int idx : sample_indices) {
             random_keys.push_back(generate_fixed_size_key(idx, KEY_SIZE));
         }
 
-        long long get_duration_sum = 0;
         for (const string& key : random_keys) {
             string read_value;
             auto start = high_resolution_clock::now();
             s = db->Get(ReadOptions(), key, &read_value);
             auto stop = high_resolution_clock::now();
+            duration += duration_cast<microseconds>(stop - start).count();
+            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, duration});
 
             if (!s.ok()) {
                 cerr << "Error during GET: " << s.ToString() << endl;
                 exit(1);
             }
 
-            get_duration_sum += duration_cast<microseconds>(stop - start).count();
+            duration = duration_cast<microseconds>(stop - start).count();
         }
-
-        duration = (num_keys_to_get > 0) ? get_duration_sum / num_keys_to_get : 0; // Average GET latency
     } else if (operation_type == "SEEK") {
-        int num_keys_to_seek = min((size_t)100, num_entries);
+        results.clear();
         vector<string> last_keys;
-        for (size_t i = num_entries - num_keys_to_seek; i < num_entries; ++i) {
+        for (size_t i = num_entries - LATENCY_SAMPLES_PER_EXPERIMENT; i < num_entries; ++i) {
             last_keys.push_back(generate_fixed_size_key(i, KEY_SIZE));
         }
 
@@ -217,9 +223,9 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
             iter->Seek(key);
             delete iter;
             auto stop = high_resolution_clock::now();
-            seek_duration_sum += duration_cast<microseconds>(stop - start).count();
+            duration = duration_cast<microseconds>(stop - start).count();
+            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, duration});
         }
-        duration = (num_keys_to_seek > 0) ? seek_duration_sum / num_keys_to_seek : 0; // Average SEEK latency
     }
 
     delete db;
@@ -231,7 +237,7 @@ BenchmarkResult run_benchmark(size_t num_entries, const string& write_buffer_siz
         cerr << "Error removing database directory: " << e.what() << endl;
     }
 
-    return {num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, duration};
+    return results;
 }
 
 /*
@@ -270,99 +276,105 @@ void signalHandler(int signal) {
 }
 
 int main() {
-    std::signal(SIGINT, signalHandler);
+    try {
+        std::signal(SIGINT, signalHandler);
 
-    vector<string> data_sizes = {
-        to_string(100UL * (1UL << 20)), // 100MB in bytes
-        to_string(1UL * (1UL << 30)),   // 1GB in bytes
-        to_string(10UL * (1UL << 30))  // 10GB in bytes
-    };
-    // vector<string> num_entries = {"10000", "50000", "100000", "200000", "500000", "1000000"};
-    vector<string> write_buffer_sizes = {"2M"};
-    vector<string> block_cache_sizes = {"64M", "128M"};
-    vector<string> compaction_styles = {"level"};
-    vector<string> bloom_filter_policies = {"true"};
-    vector<string> operation_types = {"PUT", "GET", "SEEK"};
-
-    vector<vector<string>> params = {
-        data_sizes,
-        operation_types,
-        write_buffer_sizes,
-        block_cache_sizes,
-        compaction_styles,
-        bloom_filter_policies
-    };
-
-    set<vector<string>> combinations;
-    vector<int> indices(params.size(), 0);
-
-    while (true) {
-        vector<string> current_combination {
-            params[0][indices[0]],
-            params[1][indices[1]],
-            params[2][indices[2]],
-            params[3][indices[3]],
-            params[4][indices[4]],
-            params[5][indices[5]]
+        vector<string> data_sizes = {
+            to_string(100UL * (1UL << 20)), // 100MB in bytes
+            to_string(1UL * (1UL << 30)),   // 1GB in bytes
+            to_string(10UL * (1UL << 30))  // 10GB in bytes
         };
-        combinations.insert(current_combination);
+        // vector<string> num_entries = {"10000", "50000", "100000", "200000", "500000", "1000000"};
+        vector<string> write_buffer_sizes = {"2M"};
+        vector<string> block_cache_sizes = {"64M", "128M"};
+        vector<string> compaction_styles = {"level"};
+        vector<string> bloom_filter_policies = {"true"};
+        vector<string> operation_types = {"PUT", "GET", "SEEK"};
 
-        int k = params.size() - 1;
-        while (k >= 0) {
-            indices[k]++;
-            if (indices[k] < params[k].size()) {
-                break;
-            } else {
-                indices[k] = 0;
-                k--;
+        vector<vector<string>> params = {
+            data_sizes,
+            operation_types,
+            write_buffer_sizes,
+            block_cache_sizes,
+            compaction_styles,
+            bloom_filter_policies
+        };
+
+        set<vector<string>> combinations;
+        vector<int> indices(params.size(), 0);
+
+        while (true) {
+            vector<string> current_combination {
+                params[0][indices[0]],
+                params[1][indices[1]],
+                params[2][indices[2]],
+                params[3][indices[3]],
+                params[4][indices[4]],
+                params[5][indices[5]]
+            };
+            combinations.insert(current_combination);
+
+            int k = params.size() - 1;
+            while (k >= 0) {
+                indices[k]++;
+                if (indices[k] < params[k].size()) {
+                    break;
+                } else {
+                    indices[k] = 0;
+                    k--;
+                }
+            }
+
+            if (k < 0) break; // All combinations generated
+        }
+
+        ofstream outfile(OUTPUT_PATH);
+        outfile << "data_size,operation_type,write_buffer_size,block_cache_size,compaction_style,bloom_filter_policy,latency\n";
+
+        auto overall_start = high_resolution_clock::now();
+        int total_runs = combinations.size();
+        int completed_runs = 0;
+
+
+        for (const auto& combination : combinations) {
+            size_t data_size = stoul(combination[0]);
+            size_t num_entries = data_size / ENTRY_SIZE;
+            string operation_type = combination[1];
+            string write_buffer_size = combination[2];
+            string block_cache_size = combination[3];
+            string compaction_style = combination[4];
+            string bloom_filter_policy = combination[5];
+
+            vector<BenchmarkResult> results = run_benchmark(num_entries, write_buffer_size, block_cache_size, compaction_style, bloom_filter_policy, operation_type);
+            
+            for (const auto& result : results) {
+                outfile << result.data_size << "," << result.operation_type << ","
+                        << result.write_buffer_size << "," << result.block_cache_size << ","
+                        << result.compaction_style << ","
+                        << result.bloom_filter_policy << "," << result.latency << "\n";
+            }
+
+            completed_runs++;
+
+            cout << "\033[2K\rCompleted job " << completed_runs << "/" << total_runs << " with parameters: "
+                << "data_size=" << data_size << ", "
+                << "operation_type=" << operation_type << ", "
+                << "write_buffer_size=" << write_buffer_size << ", "
+                << "block_cache_size=" << block_cache_size << ", "
+                << "compaction_style=" << compaction_style << ", "
+                << "bloom_filter_policy=" << bloom_filter_policy << endl;
+
+            if (completed_runs < total_runs) {
+                cout << "\033[2K\rCurrent job " << (completed_runs + 1) << "/" << total_runs << " ...\n" << flush;
             }
         }
 
-        if (k < 0) break; // All combinations generated
+        cout << endl;
+        outfile.close();
+        return 0;
+    } catch (const exception& e) {
+        cerr << "Error in main(): " << e.what() << endl;
+        remove_directories_with_prefix("/tmp", "/tmp/testdb");
     }
-
-    ofstream outfile(OUTPUT_PATH);
-    outfile << "data_size,operation_type,write_buffer_size,block_cache_size,compaction_style,bloom_filter_policy,latency\n";
-
-    auto overall_start = high_resolution_clock::now();
-    int total_runs = combinations.size();
-    int completed_runs = 0;
-
-
-    for (const auto& combination : combinations) {
-        size_t data_size = stoul(combination[0]);
-        size_t num_entries = data_size / ENTRY_SIZE;
-        string operation_type = combination[1];
-        string write_buffer_size = combination[2];
-        string block_cache_size = combination[3];
-        string compaction_style = combination[4];
-        string bloom_filter_policy = combination[5];
-
-        BenchmarkResult result = run_benchmark(num_entries, write_buffer_size, block_cache_size, compaction_style, bloom_filter_policy, operation_type);
-
-        outfile << result.data_size << "," << result.operation_type << ","
-                << result.write_buffer_size << "," << result.block_cache_size << ","
-                << result.compaction_style << ","
-                << result.bloom_filter_policy << "," << result.latency << "\n";
-
-        completed_runs++;
-
-        // Log the completion of the current job
-        cout << "\033[2K\rCompleted job " << completed_runs << "/" << total_runs << " with parameters: "
-             << "data_size=" << data_size << ", "
-             << "operation_type=" << operation_type << ", "
-             << "write_buffer_size=" << write_buffer_size << ", "
-             << "block_cache_size=" << block_cache_size << ", "
-             << "compaction_style=" << compaction_style << ", "
-             << "bloom_filter_policy=" << bloom_filter_policy << endl;
-
-        // Update the polling log with the next job
-        if (completed_runs < total_runs) {
-            cout << "\033[2K\rCurrent job " << (completed_runs + 1) << "/" << total_runs << " ...\n" << flush;
-        }
-    }
-
-    cout << endl;
-    outfile.close();
-    return 0;
+    
 }
