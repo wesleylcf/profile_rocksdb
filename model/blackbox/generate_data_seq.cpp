@@ -219,8 +219,8 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
             auto start = high_resolution_clock::now();
             Iterator* iter = db->NewIterator(ReadOptions());
             iter->Seek(key);
-            delete iter;
             auto stop = high_resolution_clock::now();
+            delete iter;
             duration = duration_cast<microseconds>(stop - start).count();
             results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
         }
@@ -358,7 +358,6 @@ int main() {
                 << "data_size=" << data_size << ", "
                 << "operation_type=" << operation_type << ", "
                 << "write_buffer_size=" << write_buffer_size << ", "
-                << "block_cache_size="
                 << "compaction_style=" << compaction_style << ", "
                 << "bloom_filter_policy=" << bloom_filter_policy << ", "
                 << "number_of_operations=" << number_of_operations << endl;
