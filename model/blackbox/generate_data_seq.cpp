@@ -42,7 +42,6 @@ struct BenchmarkResult {
     size_t data_size;
     string operation_type;
     string write_buffer_size;
-    string block_cache_size;
     string compaction_style;
     string bloom_filter_policy;
     size_t number_of_operations;
@@ -113,7 +112,7 @@ size_t parse_size_string(const string& size_str) {
     return size;
 }
 
-vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_operations, const string& write_buffer_size_str, const string& block_cache_size_str, const string& compaction_style, const string& bloom_filter_policy_str, const string& operation_type) {
+vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_operations, const string& write_buffer_size_str, const string& compaction_style, const string& bloom_filter_policy_str, const string& operation_type) {
     vector<BenchmarkResult> results;
 
     Options options;
@@ -135,7 +134,6 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
 
     // Block Cache and Bloom Filter
     BlockBasedTableOptions table_options;
-    table_options.block_cache = NewLRUCache(parse_size_string(block_cache_size_str));
 
     if (bloom_filter_policy_str == "true") {
         table_options.filter_policy.reset(NewBloomFilterPolicy(BLOOM_FILTER_BITS_PER_KEY));
@@ -179,7 +177,7 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
 
         if (sample_indices.find(i) != sample_indices.end()) {
             duration = duration_cast<microseconds>(stop - start).count();
-            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
+            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
         }
     }
 
@@ -200,7 +198,7 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
             s = db->Get(ReadOptions(), key, &read_value);
             auto stop = high_resolution_clock::now();
             duration += duration_cast<microseconds>(stop - start).count();
-            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
+            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
 
             if (!s.ok()) {
                 cerr << "Error during GET: " << s.ToString() << endl;
@@ -224,7 +222,7 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
             delete iter;
             auto stop = high_resolution_clock::now();
             duration = duration_cast<microseconds>(stop - start).count();
-            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, block_cache_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
+            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
         }
     }
 
@@ -286,7 +284,6 @@ int main() {
         };
         // vector<string> num_entries = {"10000", "50000", "100000", "200000", "500000", "1000000"};
         vector<string> write_buffer_sizes = {"2M"};
-        vector<string> block_cache_sizes = {"64M", "128M"};
         vector<string> compaction_styles = {"level"};
         vector<string> bloom_filter_policies = {"true"};
         vector<string> operation_types = {"PUT", "GET", "SEEK"};
@@ -296,7 +293,6 @@ int main() {
             data_sizes,
             operation_types,
             write_buffer_sizes,
-            block_cache_sizes,
             compaction_styles,
             bloom_filter_policies,
             number_of_operations
@@ -313,7 +309,6 @@ int main() {
                 params[3][indices[3]],
                 params[4][indices[4]],
                 params[5][indices[5]],
-                params[6][indices[6]],
             };
             combinations.insert(current_combination);
 
@@ -332,7 +327,7 @@ int main() {
         }
 
         ofstream outfile(OUTPUT_PATH);
-        outfile << "data_size,operation_type,write_buffer_size,block_cache_size,compaction_style,bloom_filter_policy,number_of_operations,latency\n";
+        outfile << "data_size,operation_type,write_buffer_size,compaction_style,bloom_filter_policy,number_of_operations,latency\n";
 
         auto overall_start = high_resolution_clock::now();
         int total_runs = combinations.size();
@@ -344,16 +339,15 @@ int main() {
             size_t num_entries = data_size / ENTRY_SIZE;
             string operation_type = combination[1];
             string write_buffer_size = combination[2];
-            string block_cache_size = combination[3];
-            string compaction_style = combination[4];
-            string bloom_filter_policy = combination[5];
-            size_t number_of_operations = stoul(combination[6]);
+            string compaction_style = combination[3];
+            string bloom_filter_policy = combination[4];
+            size_t number_of_operations = stoul(combination[5]);
 
-            vector<BenchmarkResult> results = run_benchmark(num_entries, number_of_operations, write_buffer_size, block_cache_size, compaction_style, bloom_filter_policy, operation_type);
+            vector<BenchmarkResult> results = run_benchmark(num_entries, number_of_operations, write_buffer_size, compaction_style, bloom_filter_policy, operation_type);
             
             for (const auto& result : results) {
                 outfile << result.data_size << "," << result.operation_type << ","
-                        << result.write_buffer_size << "," << result.block_cache_size << ","
+                        << result.write_buffer_size << ","
                         << result.compaction_style << "," << result.bloom_filter_policy << ","
                         << result.number_of_operations << "," << result.latency << "\n";
             }
@@ -364,7 +358,7 @@ int main() {
                 << "data_size=" << data_size << ", "
                 << "operation_type=" << operation_type << ", "
                 << "write_buffer_size=" << write_buffer_size << ", "
-                << "block_cache_size=" << block_cache_size << ", "
+                << "block_cache_size="
                 << "compaction_style=" << compaction_style << ", "
                 << "bloom_filter_policy=" << bloom_filter_policy << ", "
                 << "number_of_operations=" << number_of_operations << endl;
