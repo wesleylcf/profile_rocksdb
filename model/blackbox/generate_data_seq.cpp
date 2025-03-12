@@ -332,7 +332,7 @@ int main() {
         }
 
         ofstream outfile(OUTPUT_PATH);
-        outfile << "data_size,operation_type,write_buffer_size,block_cache_size,compaction_style,bloom_filter_policy,latency\n";
+        outfile << "data_size,operation_type,write_buffer_size,block_cache_size,compaction_style,bloom_filter_policy,number_of_operations,latency\n";
 
         auto overall_start = high_resolution_clock::now();
         int total_runs = combinations.size();
