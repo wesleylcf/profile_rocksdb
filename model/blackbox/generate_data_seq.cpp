@@ -136,7 +136,14 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
     while (sample_indices.size() < number_of_operations) {
         sample_indices.insert(distrib(gen));
     }
-    for (size_t i = 0; i < num_entries; ++i) {
+
+    vector<int> write_indices(num_entries);
+    for (int i = 0; i < num_entries; ++i) {
+        write_indices[i] = i;
+    }
+    shuffle(write_indices.begin(), write_indices.end(), gen); // Randomize write order
+
+    for (int i : write_indices) {
         string key = generate_fixed_size_key(i, KEY_SIZE);
         auto start = high_resolution_clock::now();
         s = db->Put(WriteOptions(), key, value);
@@ -145,9 +152,10 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
             cerr << "Error during PUT: " << s.ToString() << endl;
             exit(1);
         }
+        if (operation_type != "PUT") continue;
         if (sample_indices.find(i) != sample_indices.end()) {
             duration = duration_cast<microseconds>(stop - start).count();
-            results.push_back({num_entries * ENTRY_SIZE, operation_type, write_buffer_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
+            results.push_back({num_entries * ENTRY_SIZE, "PUT", write_buffer_size_str, compaction_style, bloom_filter_policy_str, number_of_operations, duration});
         }
     }
     if (operation_type == "GET") {
