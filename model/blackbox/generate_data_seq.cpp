@@ -238,11 +238,11 @@ int main() {
         // Dynamically calculate OUTPUT_PATH
         char* project_dir = getenv("PWD"); // Get current working directory
         if (project_dir) {
-            OUTPUT_PATH = string(project_dir) + "/model/blackbox/rocksdb_benchmark_results_sequential.csv";
+            OUTPUT_PATH = string(project_dir) + "/model/blackbox/raw.csv";
             cout << "Log: Output path set to: " << OUTPUT_PATH << endl;
         } else {
             cerr << "Error: PWD environment variable not set. Using default output path." << endl;
-            OUTPUT_PATH = "rocksdb_benchmark_results_sequential.csv"; // Default path
+            OUTPUT_PATH = "raw.csv"; // Default path
             cout << "Log: Default output path used: " << OUTPUT_PATH << endl;
         }
 
