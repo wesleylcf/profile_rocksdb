@@ -253,17 +253,21 @@ int main() {
             OUTPUT_PATH = "raw.csv"; // Default path
             cout << "Log: Default output path used: " << OUTPUT_PATH << endl;
         }
-
+        vector<string> runs = {"1", "2", "3", "4", "5"};
         vector<string> data_sizes = {
             to_string(100UL * (1UL << 20)),
+            to_string(200UL * (1UL << 20)),
+            to_string(500UL * (1UL << 20)),
             to_string(1UL * (1UL << 30)),
+            to_string(2UL * (1UL << 30)),
+            to_string(5UL * (1UL << 30)),
             to_string(10UL * (1UL << 30))
         };
         vector<string> write_buffer_sizes = {"2M"};
         vector<string> compaction_styles = {"level"};
         vector<string> bloom_filter_policies = {"true"};
         vector<string> operation_types = {"PUT", "GET", "SEEK"};
-        vector<string> number_of_operations = {"100", "1000", "10000", "100000"};
+        vector<string> number_of_operations = {"100", "800", "6400", "51200", "409600"};
 
         vector<vector<string>> params = {
             data_sizes,
@@ -271,7 +275,8 @@ int main() {
             write_buffer_sizes,
             compaction_styles,
             bloom_filter_policies,
-            number_of_operations
+            number_of_operations,
+            runs,
         };
 
         set<vector<string>> combinations;
@@ -285,6 +290,7 @@ int main() {
                 params[3][indices[3]],
                 params[4][indices[4]],
                 params[5][indices[5]],
+                params[6][indices[6]],
             };
             combinations.insert(current_combination);
 
@@ -303,7 +309,7 @@ int main() {
         }
 
         ofstream outfile(OUTPUT_PATH);
-        outfile << "data_size,operation_type,write_buffer_size,compaction_style,bloom_filter_policy,number_of_operations,latency\n";
+        outfile << "data_size,operation_type,write_buffer_size,compaction_style,bloom_filter_policy,number_of_operations,run_number,latency\n";
 
         auto overall_start = high_resolution_clock::now();
         int total_runs = combinations.size();
@@ -317,6 +323,7 @@ int main() {
             string compaction_style = combination[3];
             string bloom_filter_policy = combination[4];
             size_t number_of_operations = stoul(combination[5]);
+            string run_number = combination[6];
 
             cout << "Log: Starting benchmark with parameters: "
                 << "data_size=" << data_size << ", "
@@ -324,15 +331,16 @@ int main() {
                 << "write_buffer_size=" << write_buffer_size << ", "
                 << "compaction_style=" << compaction_style << ", "
                 << "bloom_filter_policy=" << bloom_filter_policy << ", "
-                << "number_of_operations=" << number_of_operations << endl;
+                << "number_of_operations=" << number_of_operations << ", "
+                << "run=" << run_number << endl;
 
             vector<BenchmarkResult> results = run_benchmark(num_entries, number_of_operations, write_buffer_size, compaction_style, bloom_filter_policy, operation_type);
 
             for (const auto& result : results) {
-                outfile << result.data_size << "," << result.operation_type << ","
-                        << result.write_buffer_size << ","
-                        << result.compaction_style << "," << result.bloom_filter_policy << ","
-                        << result.number_of_operations << "," << result.latency << "\n";
+                outfile << result.data_size << "," << result.operation_type << "," 
+                << result.write_buffer_size << "," << result.compaction_style << ","
+                << result.bloom_filter_policy << "," << result.number_of_operations << ","
+                << run_number << "," << result.latency << "\n";
             }
 
             completed_runs++;
@@ -343,7 +351,8 @@ int main() {
                 << "write_buffer_size=" << write_buffer_size << ", "
                 << "compaction_style=" << compaction_style << ", "
                 << "bloom_filter_policy=" << bloom_filter_policy << ", "
-                << "number_of_operations=" << number_of_operations << endl;
+                << "number_of_operations=" << number_of_operations
+                << "run=" << run_number << endl;
 
             if (completed_runs < total_runs) {
                 cout << "\033[2K\rCurrent job " << (completed_runs + 1) << "/" << total_runs << " ...\n" << flush;
