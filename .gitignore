@@ -1,5 +1,6 @@
 *.txt
 profiling/*.csv
+.ipynb*
 
 rocksdb_data_0/*
 
