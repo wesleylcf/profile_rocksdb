@@ -37,7 +37,7 @@ size_t ENTRY_SIZE = KEY_SIZE + VALUE_SIZE;
 uint64_t MAX_BYTES_PER_LEVEL_BASE = 20 * (1UL << 20); // Fixed 20MB max_bytes_for_level_base
 int BLOOM_FILTER_BITS_PER_KEY = 10;
 
-struct BenchmarkResult {
+struct ExperimentResult {
     size_t data_size;
     string operation_type;
     string write_buffer_size;
@@ -99,8 +99,8 @@ size_t parse_size_string(const string& size_str) {
     return size;
 }
 
-vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_operations, const string& write_buffer_size_str, const string& compaction_style, const string& bloom_filter_policy_str, const string& operation_type) {
-    vector<BenchmarkResult> results;
+vector<ExperimentResult> run_experiment(size_t num_entries, size_t number_of_operations, const string& write_buffer_size_str, const string& compaction_style, const string& bloom_filter_policy_str, const string& operation_type) {
+    vector<ExperimentResult> results;
     Options options;
     options.create_if_missing = true;
     options.write_buffer_size = parse_size_string(write_buffer_size_str);
@@ -179,6 +179,9 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
     } else if (operation_type == "SEEK") {
         results.clear();
         vector<string> last_keys;
+        for (int idx : sample_indices) {
+            last_keys.push_back(generate_fixed_size_key(idx, KEY_SIZE));
+        }
         for (size_t i = num_entries - number_of_operations; i < num_entries; ++i) {
             last_keys.push_back(generate_fixed_size_key(i, KEY_SIZE));
         }
@@ -197,8 +200,7 @@ vector<BenchmarkResult> run_benchmark(size_t num_entries, size_t number_of_opera
     cout << "Log: Closing RocksDB at " << db_path << endl;
 
     try {
-        fs::remove_all(db_path);
-        cout << "Log: Removed RocksDB directory " << db_path << endl;
+        remove_directories_with_prefix("/tmp", "/tmp/testdb");
     } catch (const exception& e) {
         cerr << "Error removing database directory: " << e.what() << endl;
     }
@@ -334,7 +336,7 @@ int main() {
                 << "number_of_operations=" << number_of_operations << ", "
                 << "run=" << run_number << endl;
 
-            vector<BenchmarkResult> results = run_benchmark(num_entries, number_of_operations, write_buffer_size, compaction_style, bloom_filter_policy, operation_type);
+            vector<ExperimentResult> results = run_experiment(num_entries, number_of_operations, write_buffer_size, compaction_style, bloom_filter_policy, operation_type);
 
             for (const auto& result : results) {
                 outfile << result.data_size << "," << result.operation_type << "," 
